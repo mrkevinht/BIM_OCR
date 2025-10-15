@@ -1,0 +1,76 @@
+version: "3.9"
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    command: uvicorn gateway.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      RUNPOD_ENDPOINT: http://runpod-worker:8000
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+      LOCAL_STORAGE_ROOT: /data/uploads
+      MODEL_VERSION: qwen2.5-vl-72b
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      - redis
+      - minio
+      - runpod-worker
+
+  celery:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    command: celery -A gateway.tasks.celery_app worker --loglevel=info
+    environment:
+      RUNPOD_ENDPOINT: http://runpod-worker:8000
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+      LOCAL_STORAGE_ROOT: /data/uploads
+      MODEL_VERSION: qwen2.5-vl-72b
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      - redis
+      - runpod-worker
+
+  runpod-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      MODEL_VERSION: qwen2.5-vl-72b
+    ports:
+      - "8100:8000"
+    volumes:
+      - models:/models
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:RELEASE.2024-03-15T01-07-19Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+volumes:
+  uploads:
+  minio-data:
+  models:
