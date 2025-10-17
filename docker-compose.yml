@@ -4,7 +4,7 @@ services:
   gateway:
     build:
       context: .
-      dockerfile: Dockerfile.gateway
+      dockerfile: docker/local/Dockerfile
     command: uvicorn gateway.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
@@ -14,6 +14,10 @@ services:
       STORAGE_ENDPOINT: http://minio:9000
       STORAGE_ACCESS_KEY: minioadmin
       STORAGE_SECRET_KEY: minioadmin
+      STORAGE_BUCKET: bim-ocr
+      STORAGE_REGION: us-east-1
+      STORAGE_PREFIX: jobs
+      STORAGE_FORCE_PATH_STYLE: "true"
       LOCAL_STORAGE_ROOT: /data/uploads
       MODEL_VERSION: qwen2.5-vl-72b
     volumes:
@@ -26,7 +30,7 @@ services:
   celery:
     build:
       context: .
-      dockerfile: Dockerfile.gateway
+      dockerfile: docker/local/Dockerfile
     command: celery -A gateway.tasks.celery_app worker --loglevel=info
     environment:
       RUNPOD_ENDPOINT: http://runpod-worker:8000
@@ -34,6 +38,10 @@ services:
       STORAGE_ENDPOINT: http://minio:9000
       STORAGE_ACCESS_KEY: minioadmin
       STORAGE_SECRET_KEY: minioadmin
+      STORAGE_BUCKET: bim-ocr
+      STORAGE_REGION: us-east-1
+      STORAGE_PREFIX: jobs
+      STORAGE_FORCE_PATH_STYLE: "true"
       LOCAL_STORAGE_ROOT: /data/uploads
       MODEL_VERSION: qwen2.5-vl-72b
     volumes:
@@ -45,9 +53,17 @@ services:
   runpod-worker:
     build:
       context: .
-      dockerfile: Dockerfile.worker
+      dockerfile: docker/runpod/Dockerfile
     environment:
       MODEL_VERSION: qwen2.5-vl-72b
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY: minioadmin
+      STORAGE_SECRET_KEY: minioadmin
+      STORAGE_BUCKET: bim-ocr
+      STORAGE_REGION: us-east-1
+      STORAGE_PREFIX: jobs
+      STORAGE_FORCE_PATH_STYLE: "true"
+      LOCAL_STORAGE_ROOT: /tmp/bim-ocr
     ports:
       - "8100:8000"
     volumes:

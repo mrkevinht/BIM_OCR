@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from io import BytesIO
 from typing import List
 
 from loguru import logger
@@ -8,18 +8,21 @@ from loguru import logger
 from shared import get_settings
 from shared.schemas import DocumentJob, LLMRequest, TaskType
 
+from . import storage
+
 settings = get_settings()
 
 
-def rasterize_pdf(pdf_path: str, job_id: str) -> List[str]:
+def rasterize_pdf(pdf_uri: str, job_id: str) -> List[str]:
     """
-    Convert a PDF into page-level PNG images for downstream vision inference.
+    Convert a PDF into page-level PNG images and persist them to shared storage.
 
-    Returns a list of absolute file paths pointing to the generated images.
+    Returns a list of storage URIs pointing to the generated images.
     """
 
-    logger.info("Rasterising PDF for job {}", job_id)
-    output_dir = Path(settings.local_storage_root) / job_id / "pages"
+    logger.info("Rasterising PDF for job %s", job_id)
+    local_pdf = storage.download_to_workspace(pdf_uri, job_id)
+    output_dir = storage.get_local_workspace(job_id) / "pages"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -29,15 +32,21 @@ def rasterize_pdf(pdf_path: str, job_id: str) -> List[str]:
             "pdf2image is required for rasterization. Ensure poppler is installed."
         ) from exc
 
-    images = convert_from_path(pdf_path, dpi=settings.page_image_dpi)
-    image_paths: List[str] = []
+    images = convert_from_path(str(local_pdf), dpi=settings.page_image_dpi)
+    image_uris: List[str] = []
     for index, image in enumerate(images):
-        image_path = output_dir / f"page-{index:04d}.png"
-        image.save(image_path, "PNG")
-        image_paths.append(str(image_path.resolve()))
-        logger.debug("Rendered page {} -> {}", index, image_path)
+        page_name = f"page-{index:04d}.png"
+        image_path = output_dir / page_name
+        buffer = BytesIO()
+        image.save(buffer, format="PNG")
+        image_bytes = buffer.getvalue()
+        image_path.write_bytes(image_bytes)
 
-    return image_paths
+        uri = storage.upload_page_image(job_id, page_name, image_bytes)
+        image_uris.append(uri)
+        logger.debug("Rendered page %s -> %s", index, uri)
+
+    return image_uris
 
 
 def build_llm_requests(job: DocumentJob, image_paths: List[str]) -> List[LLMRequest]:

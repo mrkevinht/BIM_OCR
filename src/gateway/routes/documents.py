@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Response, UploadFile
 from loguru import logger
 
 from shared.config import Settings, get_settings
@@ -48,13 +48,13 @@ async def upload_document(
 
     job = await document_store.create_job(filename=file.filename, tasks=tasks)
     storage_uri = await storage.persist_upload(file, job.id)
-    job = job.model_copy(
-        update={
-            "storage_uri": storage_uri,
-            "status": DocumentStatus.PROCESSING,
-            "metadata": {"storage": "local", "dpi": settings.page_image_dpi},
-        }
-    )
+    job_metadata = {
+        "storage": "s3",
+        "bucket": settings.storage_bucket,
+        "prefix": settings.storage_prefix,
+        "dpi": settings.page_image_dpi,
+    }
+    job = job.model_copy(update={"storage_uri": storage_uri, "status": DocumentStatus.PROCESSING, "metadata": job_metadata})
     await document_store.upsert(job)
 
     background_tasks.add_task(gateway_tasks.enqueue_document_processing, job, storage_uri)
@@ -79,3 +79,21 @@ async def trigger_qa(
 
     background_tasks.add_task(gateway_tasks.enqueue_document_processing, job, job.storage_uri)
     return {"status": "queued"}
+
+
+@router.delete("/documents/{job_id}/cache", status_code=204)
+async def clear_cache(job_id: str, remove_original: bool = Query(False)) -> Response:
+    job = await document_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    await storage.purge_job_cache(job_id, remove_original=remove_original)
+    metadata = dict(job.metadata)
+    metadata.update({"cache_cleared": True})
+    if remove_original:
+        job_update = {"storage_uri": None, "metadata": metadata}
+    else:
+        job_update = {"metadata": metadata}
+    await document_store.upsert(job.model_copy(update=job_update))
+    logger.info("Cleared cache for job %s (remove_original=%s)", job_id, remove_original)
+    return Response(status_code=204)

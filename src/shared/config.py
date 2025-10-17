@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     storage_access_key: str = "minioadmin"
     storage_secret_key: str = "minioadmin"
     storage_bucket: str = "bim-ocr"
+    storage_region: str = "us-east-1"
+    storage_prefix: str = "jobs"
+    storage_force_path_style: bool = True
     local_storage_root: str = "data/uploads"
 
     # Messaging / task queue
