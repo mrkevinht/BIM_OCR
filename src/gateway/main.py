@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
@@ -28,6 +29,12 @@ app.include_router(documents.router, prefix=settings.api_prefix)
 @app.on_event("startup")
 async def startup_event() -> None:
     logger.info("Gateway starting up in environment={}", settings.environment)
+
+
+@app.get("/", include_in_schema=False)
+async def index() -> RedirectResponse:
+    """Redirect the root URL to the interactive documentation."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/healthz", tags=["health"])
