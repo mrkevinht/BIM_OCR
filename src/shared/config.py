@@ -22,14 +22,7 @@ class Settings(BaseSettings):
     runpod_api_key: str | None = None
     model_version: str = "qwen2.5-vl-72b"
 
-    # Object storage (e.g. MinIO / S3)
-    storage_endpoint: str = "http://minio:9000"
-    storage_access_key: str = "minioadmin"
-    storage_secret_key: str = "minioadmin"
-    storage_bucket: str = "bim-ocr"
-    storage_region: str = "us-east-1"
-    storage_prefix: str = "jobs"
-    storage_force_path_style: bool = True
+    # Local storage root
     local_storage_root: str = "data/uploads"
 
     # Messaging / task queue
@@ -54,3 +47,4 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+

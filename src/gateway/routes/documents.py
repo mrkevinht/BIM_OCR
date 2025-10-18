@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Response, UploadFile
@@ -49,12 +50,17 @@ async def upload_document(
     job = await document_store.create_job(filename=file.filename, tasks=tasks)
     storage_uri = await storage.persist_upload(file, job.id)
     job_metadata = {
-        "storage": "s3",
-        "bucket": settings.storage_bucket,
-        "prefix": settings.storage_prefix,
+        "storage": "local",
+        "path": storage_uri,
         "dpi": settings.page_image_dpi,
     }
-    job = job.model_copy(update={"storage_uri": storage_uri, "status": DocumentStatus.PROCESSING, "metadata": job_metadata})
+    job = job.model_copy(
+        update={
+            "storage_uri": storage_uri,
+            "status": DocumentStatus.PROCESSING,
+            "metadata": job_metadata,
+        }
+    )
     await document_store.upsert(job)
 
     background_tasks.add_task(gateway_tasks.enqueue_document_processing, job, storage_uri)
@@ -87,7 +93,7 @@ async def clear_cache(job_id: str, remove_original: bool = Query(False)) -> Resp
     if job is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    await storage.purge_job_cache(job_id, remove_original=remove_original)
+    await asyncio.to_thread(storage.purge_job_cache, job_id, remove_original)
     metadata = dict(job.metadata)
     metadata.update({"cache_cleared": True})
     if remove_original:

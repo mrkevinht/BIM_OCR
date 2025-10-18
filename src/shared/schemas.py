@@ -94,14 +94,20 @@ class BIMPayload(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class Attachment(BaseModel):
+    filename: str
+    content_type: str
+    data_base64: str
+
+
 class LLMRequest(BaseModel):
     document_id: str
     page_indices: List[int]
     task: TaskType
     prompt: str
-    attachments: List[str] = Field(
+    attachments: List[Attachment] = Field(
         default_factory=list,
-        description="List of storage URIs pointing to page images or other context.",
+        description="Inline attachments (base64 encoded) that provide image or document context.",
     )
     context: dict[str, Any] = Field(default_factory=dict)
 

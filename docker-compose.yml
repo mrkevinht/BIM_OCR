@@ -10,20 +10,12 @@ services:
       RUNPOD_ENDPOINT: ${RUNPOD_ENDPOINT:-http://runpod-worker:8000}
       RUNPOD_API_KEY: ${RUNPOD_API_KEY:-}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://minio:9000}
-      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-minioadmin}
-      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-minioadmin}
-      STORAGE_BUCKET: ${STORAGE_BUCKET:-bim-ocr}
-      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
-      STORAGE_PREFIX: ${STORAGE_PREFIX:-jobs}
-      STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
       LOCAL_STORAGE_ROOT: ${LOCAL_STORAGE_ROOT:-/data/uploads}
       MODEL_VERSION: ${MODEL_VERSION:-qwen2.5-vl-72b}
     volumes:
       - uploads:/data/uploads
     depends_on:
       - redis
-      - minio
 
   celery:
     build:
@@ -34,13 +26,6 @@ services:
       RUNPOD_ENDPOINT: ${RUNPOD_ENDPOINT:-http://runpod-worker:8000}
       RUNPOD_API_KEY: ${RUNPOD_API_KEY:-}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://minio:9000}
-      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-minioadmin}
-      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-minioadmin}
-      STORAGE_BUCKET: ${STORAGE_BUCKET:-bim-ocr}
-      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
-      STORAGE_PREFIX: ${STORAGE_PREFIX:-jobs}
-      STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
       LOCAL_STORAGE_ROOT: ${LOCAL_STORAGE_ROOT:-/data/uploads}
       MODEL_VERSION: ${MODEL_VERSION:-qwen2.5-vl-72b}
     volumes:
@@ -55,14 +40,6 @@ services:
       dockerfile: docker/runpod/Dockerfile
     environment:
       MODEL_VERSION: ${MODEL_VERSION:-qwen2.5-vl-72b}
-      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-http://minio:9000}
-      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-minioadmin}
-      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-minioadmin}
-      STORAGE_BUCKET: ${STORAGE_BUCKET:-bim-ocr}
-      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
-      STORAGE_PREFIX: ${STORAGE_PREFIX:-jobs}
-      STORAGE_FORCE_PATH_STYLE: ${STORAGE_FORCE_PATH_STYLE:-true}
-      LOCAL_STORAGE_ROOT: ${LOCAL_STORAGE_ROOT:-/tmp/bim-ocr}
     ports:
       - "8100:8000"
     volumes:
@@ -73,19 +50,6 @@ services:
     ports:
       - "6379:6379"
 
-  minio:
-    image: minio/minio:RELEASE.2024-03-15T01-07-19Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    volumes:
-      - minio-data:/data
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-
 volumes:
   uploads:
-  minio-data:
   models:

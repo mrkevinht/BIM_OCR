@@ -7,7 +7,7 @@ Pipeline scaffolding for a BIM-focused OCR system that ingests architectural PDF
 - Celery worker orchestrating PDF rasterisation, prompt construction, and RunPod calls.
 - RunPod-ready microservice exposing `/analyze` for Qwen inference (stubbed for local dev).
 - Shared Pydantic schemas for BIM payloads, LLM requests, and QA outputs.
-- Dockerised development stack with Redis and MinIO for local experimentation.
+- Dockerised development stack with Redis; jobs are streamed to RunPod over HTTP (no shared S3 required).
 
 ## Project Layout
 ```
@@ -30,14 +30,17 @@ pyproject.toml          # Dependencies and package metadata
    - Docker Engine + Docker Compose v2
    - Poppler and Ghostscript if running the gateway outside Docker (for `pdf2image`)
 
-2. **Build and run the stack**
+2. **Run the stack**
    ```bash
-   docker compose up --build
+   # Run against Runpod (needs docker/.env.runpod with endpoint/token)
+   docker compose --env-file docker/.env.runpod up gateway celery redis
+
+   # or run fully local with the stub worker
+   docker compose --profile local-worker up gateway celery redis runpod-worker
    ```
    Services:
    - Gateway API: http://localhost:8000 (Swagger UI at `/docs`)
-   - RunPod worker stub: http://localhost:8100
-   - MinIO console: http://localhost:9001 (user/pass `minioadmin`)
+   - RunPod worker stub (profile `local-worker`): http://localhost:8100
    - Redis: localhost:6379
 
 3. **Upload a PDF**
@@ -60,5 +63,5 @@ The services rely on `shared.config.Settings`. Override via `.env` or Docker env
 ## Next Steps
 1. Replace the stubbed `worker.inference.run_analysis` with real Qwen2.5-VL integration (vLLM or lmdeploy).
 2. Swap the in-memory `DocumentStore` with a persistent database (PostgreSQL) and add migrations.
-3. Implement storage adapters for MinIO/S3 and push JSON outputs to Revit via MCP.
+3. Persist results to durable storage and integrate with downstream BIM tooling (e.g., Revit via MCP).
 4. Harden QA/diff engines and add automated tests (`pytest`) plus linting (`ruff`).

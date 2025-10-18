@@ -24,21 +24,21 @@ celery_app.conf.update(
 )
 
 
-def enqueue_document_processing(job: DocumentJob, pdf_uri: str) -> None:
+def enqueue_document_processing(job: DocumentJob, pdf_path: str) -> None:
     logger.info("Queueing document %s for processing", job.id)
     celery_app.send_task(
         "gateway.process_document",
-        args=[job.model_dump(mode="json"), pdf_uri],
+        args=[job.model_dump(mode="json"), pdf_path],
     )
 
 
 @celery_app.task(name="gateway.process_document", bind=True)
-def process_document(self, job_payload: dict, pdf_uri: str) -> List[dict]:
+def process_document(self, job_payload: dict, pdf_path: str) -> List[dict]:
     job = DocumentJob.model_validate(job_payload)
     logger.info("Worker started processing job %s", job.id)
 
-    image_uris = pdf_pipeline.rasterize_pdf(pdf_uri, job.id)
-    llm_requests = pdf_pipeline.build_llm_requests(job, image_uris)
+    attachments = pdf_pipeline.rasterize_pdf(pdf_path, job.id)
+    llm_requests = pdf_pipeline.build_llm_requests(job, attachments)
 
     async def _submit_all() -> List[dict]:
         if not llm_requests:

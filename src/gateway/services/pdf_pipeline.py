@@ -1,29 +1,29 @@
 from __future__ import annotations
 
+import base64
 from io import BytesIO
 from typing import List
 
 from loguru import logger
 
 from shared import get_settings
-from shared.schemas import DocumentJob, LLMRequest, TaskType
+from shared.schemas import Attachment, DocumentJob, LLMRequest, TaskType
 
 from . import storage
 
 settings = get_settings()
 
 
-def rasterize_pdf(pdf_uri: str, job_id: str) -> List[str]:
+def rasterize_pdf(pdf_path: str, job_id: str) -> List[Attachment]:
     """
-    Convert a PDF into page-level PNG images and persist them to shared storage.
+    Convert a PDF into page-level PNG images and return them as inline attachments.
 
-    Returns a list of storage URIs pointing to the generated images.
+    Returns a list of Attachment objects for downstream requests.
     """
 
     logger.info("Rasterising PDF for job %s", job_id)
-    local_pdf = storage.download_to_workspace(pdf_uri, job_id)
+    local_pdf = storage.download_to_workspace(pdf_path, job_id)
     output_dir = storage.get_local_workspace(job_id) / "pages"
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         from pdf2image import convert_from_path
@@ -33,23 +33,28 @@ def rasterize_pdf(pdf_uri: str, job_id: str) -> List[str]:
         ) from exc
 
     images = convert_from_path(str(local_pdf), dpi=settings.page_image_dpi)
-    image_uris: List[str] = []
+    attachments: List[Attachment] = []
     for index, image in enumerate(images):
         page_name = f"page-{index:04d}.png"
         image_path = output_dir / page_name
         buffer = BytesIO()
         image.save(buffer, format="PNG")
         image_bytes = buffer.getvalue()
-        image_path.write_bytes(image_bytes)
+        storage.write_bytes(image_path, image_bytes)
 
-        uri = storage.upload_page_image(job_id, page_name, image_bytes)
-        image_uris.append(uri)
-        logger.debug("Rendered page %s -> %s", index, uri)
+        attachments.append(
+            Attachment(
+                filename=page_name,
+                content_type="image/png",
+                data_base64=base64.b64encode(image_bytes).decode("ascii"),
+            )
+        )
+        logger.debug("Rendered page %s -> %s (inline attachment)", index, page_name)
 
-    return image_uris
+    return attachments
 
 
-def build_llm_requests(job: DocumentJob, image_paths: List[str]) -> List[LLMRequest]:
+def build_llm_requests(job: DocumentJob, attachments: List[Attachment]) -> List[LLMRequest]:
     """
     Create structured prompts for Qwen based on the job's requested tasks.
     """
@@ -84,7 +89,7 @@ def build_llm_requests(job: DocumentJob, image_paths: List[str]) -> List[LLMRequ
         ),
     }
 
-    for page_index, image_path in enumerate(image_paths):
+    for page_index, attachment in enumerate(attachments):
         for task in job.tasks:
             prompt = base_prompts.get(task)
             if not prompt:
@@ -96,7 +101,7 @@ def build_llm_requests(job: DocumentJob, image_paths: List[str]) -> List[LLMRequ
                 page_indices=[page_index],
                 task=task,
                 prompt=prompt,
-                attachments=[image_path],
+                attachments=[attachment],
                 context={"filename": job.filename},
             )
             requests.append(request)
