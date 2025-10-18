@@ -12,7 +12,7 @@ The gateway needs Redis (Celery broker). Two ways to run:
 
 1. Create `docker/.env.runpod` (git-ignored) with:
    ```
-   RUNPOD_ENDPOINT=https://api.runpod.ai/v2/<endpoint-id>/run
+   RUNPOD_ENDPOINT=https://api.runpod.ai/v2/<endpoint-id>
    RUNPOD_API_KEY=<runpod-api-key-if-required>
    ```
    After editing the file, restart the stack (`docker compose down`, then run the desired `docker compose ...` command).
@@ -129,4 +129,5 @@ curl -X DELETE http://localhost:8000/api/v1/documents/<job_id>/cache
 | Rebuild images (after dependency changes) | `docker compose build gateway celery runpod-worker` |
 
 Now you are ready to upload PDFs through Swagger UI or any HTTP client and see them processed by the gateway.
+
 
