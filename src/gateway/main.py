@@ -1,6 +1,9 @@
+from pathlib import Path
+
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from shared import get_settings
@@ -14,6 +17,10 @@ app = FastAPI(
     version="0.1.0",
     description="Public API for uploading architectural PDFs and orchestrating Qwen OCR workflows.",
 )
+
+frontend_dir = Path(__file__).resolve().parent / "web"
+if frontend_dir.exists():
+    app.mount("/assets", StaticFiles(directory=frontend_dir), name="assets")
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,9 +39,19 @@ async def startup_event() -> None:
 
 
 @app.get("/", include_in_schema=False)
-async def index() -> RedirectResponse:
-    """Redirect the root URL to the interactive documentation."""
-    return RedirectResponse(url="/docs")
+async def index() -> HTMLResponse:
+    """Serve the lightweight chat-style frontend."""
+    if not frontend_dir.exists():
+        return HTMLResponse("<h1>BIM OCR Gateway</h1><p>Frontend assets missing.</p>", status_code=200)
+
+    index_path = frontend_dir / "index.html"
+    if not index_path.exists():
+        return HTMLResponse(
+            "<h1>BIM OCR Gateway</h1><p>frontend/web/index.html missing.</p>",
+            status_code=200,
+        )
+
+    return HTMLResponse(index_path.read_text(encoding="utf-8"))
 
 
 @app.get("/healthz", tags=["health"])

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import List
 
+from pathlib import Path
+
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Response, UploadFile
 from loguru import logger
 
@@ -44,8 +46,13 @@ async def upload_document(
     tasks: List[TaskType] = Query([TaskType.LAYOUT, TaskType.ROOMS, TaskType.ANNOTATIONS]),
     settings: Settings = Depends(get_config),
 ) -> DocumentJob:
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
+    allowed_extensions = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+    extension = Path(file.filename).suffix.lower()
+    if extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF or image uploads (png, jpg, webp) are supported",
+        )
 
     job = await document_store.create_job(filename=file.filename, tasks=tasks)
     storage_uri = await storage.persist_upload(file, job.id)
@@ -53,6 +60,7 @@ async def upload_document(
         "storage": "local",
         "path": storage_uri,
         "dpi": settings.page_image_dpi,
+        "source_extension": extension or ".pdf",
     }
     job = job.model_copy(
         update={

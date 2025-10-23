@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from io import BytesIO
+from pathlib import Path
 from typing import List
 
 from loguru import logger
@@ -16,15 +17,25 @@ settings = get_settings()
 
 def rasterize_pdf(pdf_path: str, job_id: str) -> List[Attachment]:
     """
-    Convert a PDF into page-level PNG images and return them as inline attachments.
+    Convert an uploaded document into page-level PNG images and return them as inline attachments.
 
     Returns a list of Attachment objects for downstream requests.
     """
 
     logger.info("Rasterising PDF for job %s", job_id)
-    local_pdf = storage.download_to_workspace(pdf_path, job_id)
+    local_path = storage.download_to_workspace(pdf_path, job_id)
     output_dir = storage.get_local_workspace(job_id) / "pages"
 
+    suffix = Path(local_path).suffix.lower()
+    if suffix == ".pdf":
+        return _rasterize_pdf_document(local_path, output_dir)
+    if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+        return _make_single_page_attachment(local_path, output_dir)
+
+    raise RuntimeError(f"Unsupported document type: {suffix}")
+
+
+def _rasterize_pdf_document(local_pdf: Path, output_dir: Path) -> List[Attachment]:
     try:
         from pdf2image import convert_from_path
     except ImportError as exc:
@@ -52,6 +63,33 @@ def rasterize_pdf(pdf_path: str, job_id: str) -> List[Attachment]:
         logger.debug("Rendered page %s -> %s (inline attachment)", index, page_name)
 
     return attachments
+
+
+def _make_single_page_attachment(source_path: Path, output_dir: Path) -> List[Attachment]:
+    logger.debug("Wrapping image %s as single-page attachment", source_path.name)
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError("Pillow is required to process image uploads.") from exc
+
+    image = Image.open(source_path)
+    if image.mode not in {"RGB", "RGBA"}:
+        image = image.convert("RGBA")
+
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    image_bytes = buffer.getvalue()
+
+    page_name = "page-0000.png"
+    image_path = output_dir / page_name
+    storage.write_bytes(image_path, image_bytes)
+
+    attachment = Attachment(
+        filename=page_name,
+        content_type="image/png",
+        data_base64=base64.b64encode(image_bytes).decode("ascii"),
+    )
+    return [attachment]
 
 
 def build_llm_requests(job: DocumentJob, attachments: List[Attachment]) -> List[LLMRequest]:
