@@ -31,7 +31,8 @@ dependencies = [
 worker = [
     "vllm>=0.4.2",
     "einops>=0.8.0",
-    "transformers>=4.40.0"
+    "transformers>=4.40.0",
+    "runpod>=0.10.2"
 ]
 
 [build-system]

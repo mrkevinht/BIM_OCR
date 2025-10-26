@@ -19,6 +19,9 @@ RUN python -m pip install --upgrade pip && \
 
 ENV PYTHONPATH=/app/src
 
+COPY docker/runpod/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 8000
 
-CMD ["uvicorn", "worker.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/entrypoint.sh"]
