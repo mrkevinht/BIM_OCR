@@ -45,9 +45,9 @@ class RunPodClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
         logger.info(
-            "Submitting request to RunPod: doc=%s task=%s pages=%s",
+            "Submitting request to RunPod: doc=%s tasks=%s pages=%s",
             request.document_id,
-            request.task,
+            [task.task for task in request.tasks],
             request.page_indices,
         )
 
@@ -79,9 +79,9 @@ class RunPodClient:
 
         payload = request.model_dump(mode="json")
         logger.info(
-            "Submitting serverless RunPod request: doc=%s task=%s pages=%s",
+            "Submitting serverless RunPod request: doc=%s tasks=%s pages=%s",
             request.document_id,
-            request.task,
+            [task.task for task in request.tasks],
             request.page_indices,
         )
         response = await self._client.post(
@@ -100,9 +100,10 @@ class RunPodClient:
 
         while True:
             if deadline and time.monotonic() >= deadline:
+                task_names = [task.task for task in request.tasks]
                 timeout_msg = (
                     f"RunPod job {job_id} exceeded timeout of {self._timeout_seconds}s "
-                    f"(task={request.task}, pages={request.page_indices})"
+                    f"(tasks={task_names}, pages={request.page_indices})"
                 )
                 raise RuntimeError(timeout_msg)
 

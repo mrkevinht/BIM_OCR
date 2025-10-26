@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Response
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
@@ -21,6 +21,9 @@ app = FastAPI(
 frontend_dir = Path(__file__).resolve().parent / "web"
 if frontend_dir.exists():
     app.mount("/assets", StaticFiles(directory=frontend_dir), name="assets")
+    favicon_path = frontend_dir / "favicon.ico"
+else:
+    favicon_path = None
 
 app.add_middleware(
     CORSMiddleware,
@@ -52,6 +55,13 @@ async def index() -> HTMLResponse:
         )
 
     return HTMLResponse(index_path.read_text(encoding="utf-8"))
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    if favicon_path and favicon_path.exists():
+        return FileResponse(favicon_path)
+    return Response(status_code=204)
 
 
 @app.get("/healthz", tags=["health"])
