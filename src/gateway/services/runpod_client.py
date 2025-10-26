@@ -8,7 +8,7 @@ import httpx
 from loguru import logger
 
 from shared import get_settings
-from shared.schemas import LLMRequest, LLMResponse
+from shared.schemas import LLMBatchRequest, LLMResponse, TaskType
 
 settings = get_settings()
 
@@ -36,7 +36,7 @@ class RunPodClient:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def submit(self, request: LLMRequest) -> LLMResponse:
+    async def submit(self, request: LLMBatchRequest) -> List[LLMResponse]:
         if self._is_serverless:
             return await self._submit_serverless(request)
 
@@ -59,20 +59,20 @@ class RunPodClient:
         self._ensure_success(response, request, action="POST /analyze")
 
         payload = response.json()
-        return self._build_response(payload, request)
+        return self._build_responses(payload, request)
 
-    async def submit_batch(self, requests: Iterable[LLMRequest]) -> List[LLMResponse]:
+    async def submit_batch(self, requests: Iterable[LLMBatchRequest]) -> List[LLMResponse]:
         results: List[LLMResponse] = []
         for request in requests:
             try:
                 result = await self.submit(request)
-                results.append(result)
+                results.extend(result)
             except Exception as exc:
                 logger.exception("RunPod request failed for job %s", request.document_id)
                 raise
         return results
 
-    async def _submit_serverless(self, request: LLMRequest) -> LLMResponse:
+    async def _submit_serverless(self, request: LLMBatchRequest) -> List[LLMResponse]:
         headers = {}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -133,9 +133,7 @@ class RunPodClient:
                 output = status_payload.get("output")
                 if isinstance(output, list):
                     output = output[0] if output else {}
-                if not isinstance(output, dict):
-                    raise RuntimeError("Unexpected serverless output format")
-                return self._build_response(output, request)
+                return self._build_responses(output, request)
             if status in {"FAILED", "CANCELLED"}:
                 error_msg = status_payload.get("error", "Unknown error")
                 raise RuntimeError(f"RunPod job {job_id} failed: {error_msg}")
@@ -145,20 +143,51 @@ class RunPodClient:
             await asyncio.sleep(sleep_for)
 
     @staticmethod
-    def _build_response(payload: dict, request: LLMRequest) -> LLMResponse:
-        return LLMResponse(
-            request_id=payload.get("request_id", ""),
-            document_id=request.document_id,
-            model_version=payload.get("model_version", settings.model_version),
-            task=request.task,
-            raw_text=payload.get("raw_text", ""),
-            parsed_json=payload.get("parsed_json"),
-            tokens_input=payload.get("tokens_input"),
-            tokens_output=payload.get("tokens_output"),
-            latency_ms=payload.get("latency_ms"),
-        )
+    def _normalize_task(raw_task: str | TaskType | None, request: LLMBatchRequest) -> TaskType:
+        if isinstance(raw_task, TaskType):
+            return raw_task
+        if isinstance(raw_task, str):
+            try:
+                return TaskType(raw_task)
+            except ValueError:
+                logger.warning("Unknown task value '%s' returned by RunPod; defaulting to first task.", raw_task)
+        return request.tasks[0].task if request.tasks else TaskType.LAYOUT
 
-    def _ensure_success(self, response: httpx.Response, request: LLMRequest, *, action: str) -> None:
+    def _build_responses(self, payload: dict | list, request: LLMBatchRequest) -> List[LLMResponse]:
+        if payload is None:
+            raise RuntimeError("RunPod response payload is empty")
+
+        if isinstance(payload, list):
+            entries = payload
+        else:
+            responses_field = payload.get("responses")
+            if isinstance(responses_field, list):
+                entries = responses_field
+            else:
+                entries = [payload]
+
+        responses: List[LLMResponse] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                logger.warning("Skipping malformed response entry: %s", entry)
+                continue
+            task = self._normalize_task(entry.get("task"), request)
+            responses.append(
+                LLMResponse(
+                    request_id=entry.get("request_id", ""),
+                    document_id=request.document_id,
+                    model_version=entry.get("model_version", settings.model_version),
+                    task=task,
+                    raw_text=entry.get("raw_text", ""),
+                    parsed_json=entry.get("parsed_json"),
+                    tokens_input=entry.get("tokens_input"),
+                    tokens_output=entry.get("tokens_output"),
+                    latency_ms=entry.get("latency_ms"),
+                )
+            )
+        return responses
+
+    def _ensure_success(self, response: httpx.Response, request: LLMBatchRequest, *, action: str) -> None:
         try:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -167,7 +196,7 @@ class RunPodClient:
     def _format_http_error(
         self,
         exc: httpx.HTTPStatusError,
-        request: LLMRequest,
+        request: LLMBatchRequest,
         action: str,
     ) -> str:
         status_code = exc.response.status_code
@@ -183,13 +212,14 @@ class RunPodClient:
         elif status_code == 403:
             hint = "API key lacks permission for endpoint %s" % self._endpoint
 
+        tasks_repr = [task.task for task in request.tasks] if request.tasks else []
         message = (
-            "RunPod %s failed with HTTP %s for job %s (task=%s, pages=%s): %s"
+            "RunPod %s failed with HTTP %s for job %s (tasks=%s, pages=%s): %s"
             % (
                 action,
                 status_code,
                 request.document_id,
-                request.task,
+                tasks_repr,
                 request.page_indices,
                 body_preview,
             )

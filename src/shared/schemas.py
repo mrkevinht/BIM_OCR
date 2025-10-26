@@ -100,6 +100,11 @@ class Attachment(BaseModel):
     data_base64: str
 
 
+class LLMTaskPrompt(BaseModel):
+    task: TaskType
+    prompt: str
+
+
 class LLMRequest(BaseModel):
     document_id: str
     page_indices: List[int]
@@ -123,6 +128,17 @@ class LLMResponse(BaseModel):
     tokens_output: int | None = None
     latency_ms: int | None = None
     received_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class LLMBatchRequest(BaseModel):
+    document_id: str
+    page_indices: List[int]
+    tasks: List[LLMTaskPrompt] = Field(default_factory=list)
+    attachments: List[Attachment] = Field(
+        default_factory=list,
+        description="Inline attachments (base64 encoded) that provide image or document context.",
+    )
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class DocumentJob(BaseModel):

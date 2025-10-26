@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from loguru import logger
 
 from shared import get_settings
-from shared.schemas import LLMRequest, LLMResponse
+from shared.schemas import LLMBatchRequest, LLMResponse
 
 from . import inference
 
@@ -20,15 +20,15 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok", "model": settings.model_version}
 
 
-@app.post("/analyze", response_model=LLMResponse)
-async def analyze(request: LLMRequest) -> LLMResponse:
+@app.post("/analyze", response_model=list[LLMResponse])
+async def analyze(request: LLMBatchRequest) -> list[LLMResponse]:
     try:
         result = await inference.run_analysis(request)
         logger.info(
-            "Processed RunPod request %s for document %s task %s",
-            result.request_id,
+            "Processed RunPod batch for document %s page_indices=%s tasks=%s",
             request.document_id,
-            request.task,
+            request.page_indices,
+            [task.task for task in request.tasks],
         )
         return result
     except Exception as exc:  # pragma: no cover - defensive logging

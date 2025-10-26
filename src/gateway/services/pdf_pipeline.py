@@ -9,7 +9,7 @@ from typing import List
 from loguru import logger
 
 from shared import get_settings
-from shared.schemas import Attachment, DocumentJob, LLMRequest, TaskType
+from shared.schemas import Attachment, DocumentJob, LLMBatchRequest, LLMTaskPrompt, TaskType
 
 from . import storage
 
@@ -134,12 +134,12 @@ def _encode_image(image, quality: int) -> bytes:
     return buffer.getvalue()
 
 
-def build_llm_requests(job: DocumentJob, attachments: List[Attachment]) -> List[LLMRequest]:
+def build_llm_requests(job: DocumentJob, attachments: List[Attachment]) -> List[LLMBatchRequest]:
     """
     Create structured prompts for Qwen based on the job's requested tasks.
     """
 
-    requests: List[LLMRequest] = []
+    requests: List[LLMBatchRequest] = []
     if not job.tasks:
         logger.warning("Job {} has no tasks configured, skipping prompt build", job.id)
         return requests
@@ -170,23 +170,30 @@ def build_llm_requests(job: DocumentJob, attachments: List[Attachment]) -> List[
     }
 
     for page_index, attachment in enumerate(attachments):
+        prompts: List[LLMTaskPrompt] = []
         for task in job.tasks:
             prompt = base_prompts.get(task)
             if not prompt:
                 logger.warning("No prompt template for task {}", task)
                 continue
+            prompts.append(LLMTaskPrompt(task=task, prompt=prompt))
 
-            request = LLMRequest(
-                document_id=job.id,
-                page_indices=[page_index],
-                task=task,
-                prompt=prompt,
-                attachments=[attachment],
-                context={"filename": job.filename},
-            )
-            requests.append(request)
-            logger.debug(
-                "Prepared LLM request for job {} page {} task {}", job.id, page_index, task
-            )
+        if not prompts:
+            continue
+
+        request = LLMBatchRequest(
+            document_id=job.id,
+            page_indices=[page_index],
+            tasks=prompts,
+            attachments=[attachment],
+            context={"filename": job.filename},
+        )
+        requests.append(request)
+        logger.debug(
+            "Prepared multi-task LLM request for job {} page {} tasks {}",
+            job.id,
+            page_index,
+            [task.task for task in prompts],
+        )
 
     return requests
