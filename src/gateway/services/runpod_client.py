@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Iterable, List
 
 import httpx
@@ -23,6 +24,8 @@ class RunPodClient:
         self._api_key = api_key or settings.runpod_api_key
         self._client = httpx.AsyncClient(base_url=self._endpoint, timeout=120.0)
         self._is_serverless = "api.runpod.ai" in self._endpoint
+        self._timeout_seconds = max(0, settings.runpod_serverless_timeout_seconds)
+        self._poll_interval = max(0.2, settings.runpod_poll_interval_seconds)
 
     async def __aenter__(self) -> "RunPodClient":
         return self
@@ -92,9 +95,38 @@ class RunPodClient:
         if not job_id:
             raise RuntimeError("RunPod response missing job id")
 
+        poll_attempts = 0
+        deadline = time.monotonic() + self._timeout_seconds if self._timeout_seconds else None
+
         while True:
+            if deadline and time.monotonic() >= deadline:
+                timeout_msg = (
+                    f"RunPod job {job_id} exceeded timeout of {self._timeout_seconds}s "
+                    f"(task={request.task}, pages={request.page_indices})"
+                )
+                raise RuntimeError(timeout_msg)
+
+            poll_attempts += 1
             status_response = await self._client.get(f"/status/{job_id}", headers=headers)
-            self._ensure_success(status_response, request, action="GET /status")
+            try:
+                status_response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                if status_code in {429, 500, 502, 503, 504}:
+                    delay = min(5.0, 1.0 + poll_attempts * 0.5)
+                    logger.warning(
+                        "Transient error when polling RunPod status for job %s (HTTP %s). Retrying in %.1fs",
+                        job_id,
+                        status_code,
+                        delay,
+                    )
+                    sleep_for = delay
+                    if deadline:
+                        sleep_for = max(0.0, min(delay, deadline - time.monotonic()))
+                    await asyncio.sleep(sleep_for)
+                    continue
+                raise RuntimeError(self._format_http_error(exc, request, "GET /status")) from exc
+
             status_payload = status_response.json()
             status = status_payload.get("status")
             if status == "COMPLETED":
@@ -107,7 +139,10 @@ class RunPodClient:
             if status in {"FAILED", "CANCELLED"}:
                 error_msg = status_payload.get("error", "Unknown error")
                 raise RuntimeError(f"RunPod job {job_id} failed: {error_msg}")
-            await asyncio.sleep(1.0)
+            sleep_for = self._poll_interval
+            if deadline:
+                sleep_for = max(0.0, min(self._poll_interval, deadline - time.monotonic()))
+            await asyncio.sleep(sleep_for)
 
     @staticmethod
     def _build_response(payload: dict, request: LLMRequest) -> LLMResponse:

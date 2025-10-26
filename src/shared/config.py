@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     # RunPod inference endpoint
     runpod_endpoint: str = "http://runpod-worker:8000"
     runpod_api_key: str | None = None
+    runpod_serverless_timeout_seconds: int = 60
+    runpod_poll_interval_seconds: float = 1.0
     model_version: str = "qwen2.5-vl-72b"
 
     # Local storage root

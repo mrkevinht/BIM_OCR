@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from io import BytesIO
+from math import sqrt
 from pathlib import Path
 from typing import List
 
@@ -14,10 +15,15 @@ from . import storage
 
 settings = get_settings()
 
+MAX_BODY_BYTES = 7 * 1024 * 1024  # keep comfortably below 10MiB serverless limit
+MAX_IMAGE_PIXELS = 4_000_000
+INITIAL_JPEG_QUALITY = 85
+MIN_JPEG_QUALITY = 45
+
 
 def rasterize_pdf(pdf_path: str, job_id: str) -> List[Attachment]:
     """
-    Convert an uploaded document into page-level PNG images and return them as inline attachments.
+    Convert an uploaded document into page-level JPEG images and return them as inline attachments.
 
     Returns a list of Attachment objects for downstream requests.
     """
@@ -46,21 +52,13 @@ def _rasterize_pdf_document(local_pdf: Path, output_dir: Path) -> List[Attachmen
     images = convert_from_path(str(local_pdf), dpi=settings.page_image_dpi)
     attachments: List[Attachment] = []
     for index, image in enumerate(images):
-        page_name = f"page-{index:04d}.png"
-        image_path = output_dir / page_name
-        buffer = BytesIO()
-        image.save(buffer, format="PNG")
-        image_bytes = buffer.getvalue()
-        storage.write_bytes(image_path, image_bytes)
-
-        attachments.append(
-            Attachment(
-                filename=page_name,
-                content_type="image/png",
-                data_base64=base64.b64encode(image_bytes).decode("ascii"),
-            )
+        attachment = _build_attachment(image, output_dir, index)
+        attachments.append(attachment)
+        logger.debug(
+            "Rendered page %s -> %s (inline attachment)",
+            index,
+            attachment.filename,
         )
-        logger.debug("Rendered page %s -> %s (inline attachment)", index, page_name)
 
     return attachments
 
@@ -73,23 +71,67 @@ def _make_single_page_attachment(source_path: Path, output_dir: Path) -> List[At
         raise RuntimeError("Pillow is required to process image uploads.") from exc
 
     image = Image.open(source_path)
+    attachment = _build_attachment(image, output_dir, page_index=0)
+    return [attachment]
+
+
+def _build_attachment(image, output_dir: Path, page_index: int) -> Attachment:
+    from PIL import Image
+
     if image.mode not in {"RGB", "RGBA"}:
-        image = image.convert("RGBA")
+        image = image.convert("RGB")
 
-    buffer = BytesIO()
-    image.save(buffer, format="PNG")
-    image_bytes = buffer.getvalue()
+    image = _clamp_image_dimensions(image)
 
-    page_name = "page-0000.png"
-    image_path = output_dir / page_name
+    quality = INITIAL_JPEG_QUALITY
+    image_bytes = _encode_image(image, quality)
+
+    while len(image_bytes) > MAX_BODY_BYTES and quality > MIN_JPEG_QUALITY:
+        quality = max(MIN_JPEG_QUALITY, quality - 10)
+        image_bytes = _encode_image(image, quality)
+
+    if len(image_bytes) > MAX_BODY_BYTES:
+        raise RuntimeError(
+            f"Attachment for page {page_index} still exceeds size limit after compression "
+            f"({len(image_bytes)} bytes)"
+        )
+
+    filename = f"page-{page_index:04d}.jpg"
+    image_path = output_dir / filename
     storage.write_bytes(image_path, image_bytes)
 
-    attachment = Attachment(
-        filename=page_name,
-        content_type="image/png",
+    return Attachment(
+        filename=filename,
+        content_type="image/jpeg",
         data_base64=base64.b64encode(image_bytes).decode("ascii"),
     )
-    return [attachment]
+
+
+def _clamp_image_dimensions(image):
+    width, height = image.size
+    total_pixels = width * height
+    if total_pixels <= MAX_IMAGE_PIXELS:
+        return image.convert("RGB") if image.mode != "RGB" else image
+
+    scale = sqrt(MAX_IMAGE_PIXELS / total_pixels)
+    new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+
+    from PIL import Image
+
+    logger.warning(
+        "Downscaling image from %sx%s to %sx%s to meet size limits",
+        width,
+        height,
+        new_size[0],
+        new_size[1],
+    )
+    return image.resize(new_size, Image.Resampling.LANCZOS).convert("RGB")
+
+
+def _encode_image(image, quality: int) -> bytes:
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", quality=quality, optimize=True)
+    return buffer.getvalue()
 
 
 def build_llm_requests(job: DocumentJob, attachments: List[Attachment]) -> List[LLMRequest]:
